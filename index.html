@@ -8,8 +8,10 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Преміальний студентський портал МБ-302 з розкладом, завданнями, матеріалами та аналітикою.">
 
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
     <script src="https://cdn.tailwindcss.com"></script>
 
+    <link rel="preconnect" href="https://unpkg.com">
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1046,6 +1048,84 @@
             .appearance-sheet-header{margin-bottom:18px}
         }
         @media (prefers-reduced-motion:reduce){.appearance-sheet-backdrop,.appearance-sheet{animation:none}}
+    </style>
+
+    <style id="android-performance-layer">
+        /* Android GPU-friendly rendering: preserve the premium look, reduce expensive compositing. */
+        @media (max-width: 767px) and (pointer: coarse) {
+            /* Frosted glass: use a smaller blur radius on phones. */
+            .glass-panel,
+            .glass-card,
+            header > div,
+            #mobile-dock nav,
+            .appearance-sheet-backdrop,
+            .nav-liquid-indicator {
+                -webkit-backdrop-filter: blur(8px) saturate(120%) !important;
+                backdrop-filter: blur(8px) saturate(120%) !important;
+            }
+
+            /* Keep depth with translucent fills instead of huge blur kernels. */
+            .glass-panel { background: rgba(9,9,12,.82) !important; }
+            .glass-card { background: rgba(11,11,15,.74) !important; }
+            header > div { background: linear-gradient(180deg, rgba(20,20,26,.78), rgba(9,9,13,.70)) !important; }
+            #mobile-dock nav { background: linear-gradient(180deg, rgba(24,24,31,.80), rgba(8,9,13,.72)) !important; }
+
+            /* Large blurred animated shapes are expensive during scroll. */
+            .bg-orb { filter: blur(40px) !important; }
+            .bg-pattern { animation-duration: 32s !important; }
+            .bg-orb-a, .bg-orb-b, .bg-orb-c, .bg-pattern {
+                animation-play-state: paused;
+            }
+
+            /* Resume background motion only when the page is idle. */
+            body.android-idle .bg-orb-a,
+            body.android-idle .bg-orb-b,
+            body.android-idle .bg-orb-c,
+            body.android-idle .bg-pattern {
+                animation-play-state: running;
+            }
+
+            /* No fixed attachment on mobile. */
+            body.premium-bg-aurora,
+            body.premium-bg-sunset,
+            body.premium-bg-ocean,
+            body.premium-bg-forest,
+            body.premium-bg-mono {
+                background-attachment: scroll !important;
+            }
+
+            /* Decorative layers never need their own paint/compositing complexity. */
+            #ambient-background,
+            .portal-bg-layer,
+            .geometry-field,
+            .bg-orb,
+            .bg-pattern,
+            .bg-vignette {
+                pointer-events: none !important;
+            }
+
+            /* Avoid forcing unnecessary compositor layers. */
+            .glass-card,
+            .glass-panel,
+            .bg-orb,
+            .bg-pattern { will-change: auto !important; }
+
+            /* Reduce the amount of work needed for long dynamically rendered views. */
+            #main-content > div > section,
+            #main-content > div > .schedule-day-card,
+            #main-content > div > .glass-card {
+                content-visibility: auto;
+                contain-intrinsic-size: 1px 220px;
+            }
+
+            /* Mobile interactions: transform only, avoid filter-heavy hover effects. */
+            .glass-card:hover,
+            .deadline-card:hover { transform: none !important; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .bg-orb-a, .bg-orb-b, .bg-orb-c, .bg-pattern { animation: none !important; }
+        }
     </style>
 </head>
 <body class="text-zinc-200 bg-zinc-950 antialiased min-h-screen flex flex-col relative overflow-x-hidden">
@@ -3921,5 +4001,26 @@
         // Run Init
         document.addEventListener('DOMContentLoaded', initApp);
     </script>
+
+<script>
+(() => {
+    const isAndroidTouch = /Android/i.test(navigator.userAgent) && matchMedia?.('(pointer: coarse)').matches;
+    if (!isAndroidTouch) return;
+    let idleTimer = 0;
+    const setIdle = (idle) => document.body.classList.toggle('android-idle', idle);
+    const markScroll = () => {
+        setIdle(false);
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => setIdle(true), 180);
+    };
+    window.addEventListener('scroll', markScroll, { passive: true });
+    window.addEventListener('touchstart', () => setIdle(false), { passive: true });
+    window.addEventListener('touchend', () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => setIdle(true), 220);
+    }, { passive: true });
+    setIdle(true);
+})();
+</script>
 </body>
 </html>
