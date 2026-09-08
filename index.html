@@ -1048,6 +1048,76 @@
             .appearance-sheet-header{margin-bottom:18px}
         }
         @media (prefers-reduced-motion:reduce){.appearance-sheet-backdrop,.appearance-sheet{animation:none}}
+
+        /* Production mobile rendering profile: same visual language, less continuous GPU work. */
+        @media (max-width: 767px) and (pointer: coarse) {
+            html { text-rendering: optimizeSpeed; }
+            #ambient-background { contain: strict; }
+            .portal-bg-layer { contain: paint; }
+
+            /* Solid translucent surfaces are visually equivalent here but much cheaper than large backdrop blurs. */
+            header > div,
+            #mobile-dock nav,
+            .glass-panel,
+            .glass-card {
+                -webkit-backdrop-filter: blur(8px) saturate(115%) !important;
+                backdrop-filter: blur(8px) saturate(115%) !important;
+            }
+            .glass-panel { background: rgba(10,10,13,.86) !important; }
+            .glass-card { background: rgba(12,12,16,.78) !important; }
+            header > div { background: linear-gradient(180deg, rgba(20,20,26,.84), rgba(9,9,13,.78)) !important; }
+            #mobile-dock nav { background: linear-gradient(180deg, rgba(24,24,31,.86), rgba(8,9,13,.78)) !important; }
+
+            /* Keep blur only for short-lived overlays. */
+            #mobile-menu,
+            .appearance-sheet-backdrop {
+                -webkit-backdrop-filter: blur(10px) saturate(115%) !important;
+                backdrop-filter: blur(10px) saturate(115%) !important;
+            }
+
+            /* Reduce the size and softness of animated background layers. */
+            .bg-orb { filter: blur(36px) !important; opacity: .44 !important; }
+            .bg-orb-a { width: 68vw !important; height: 68vw !important; }
+            .bg-orb-b { width: 62vw !important; height: 62vw !important; }
+            .bg-orb-c { width: 54vw !important; height: 54vw !important; }
+            .bg-pattern { animation-duration: 32s !important; opacity: .38 !important; }
+
+            /* Long lists paint only when approaching the viewport. */
+            #auth-list,
+            #main-content .schedule-day-card,
+            #main-content .student-mobile-card,
+            #main-content .deadline-card {
+                content-visibility: auto;
+                contain-intrinsic-size: 1px 160px;
+            }
+
+            /* Avoid costly hover/visual effects on touch devices. */
+            .glass-card:hover,
+            .appearance-option:hover,
+            .appearance-color:hover { transform: none !important; }
+
+            /* While the user scrolls, freeze ambient motion; resume shortly after scrolling ends. */
+            body.is-scrolling .bg-orb-a,
+            body.is-scrolling .bg-orb-b,
+            body.is-scrolling .bg-orb-c,
+            body.is-scrolling .bg-pattern { animation-play-state: paused !important; }
+            body.is-scrolling .premium-shine::after { display: none !important; }
+        }
+
+        @media (max-width: 767px) and (pointer: coarse) and (prefers-reduced-motion: no-preference) {
+            /* Entry animations stay quick; long staggered animations become almost free. */
+            .animate-slide-up,
+            .animate-slide-in-right,
+            .animate-scale-in,
+            .animate-pop-in { animation-duration: .28s !important; }
+        }
+
+        @media (max-width: 767px) and (pointer: coarse) and (max-width: 390px) {
+            .glass-panel,
+            .glass-card,
+            header > div,
+            #mobile-dock nav { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+        }
     </style>
 
     <style id="android-performance-layer">
@@ -1252,13 +1322,6 @@
                 const saved = localStorage.getItem('portal-device-profile') || localStorage.getItem('selectedStudentId');
                 if (auth && !saved) auth.classList.remove('hidden');
             } catch (e) {}
-            window.setTimeout(() => {
-                try {
-                    const auth = document.getElementById('auth-screen');
-                    const saved = localStorage.getItem('portal-device-profile') || localStorage.getItem('selectedStudentId');
-                    if (auth && !saved) auth.classList.remove('hidden');
-                } catch (e) {}
-            }, 1200);
         })();
     </script>
 
@@ -2064,7 +2127,10 @@
             }
 
             try {
-                if (window.lucide?.createIcons) lucide.createIcons();
+                if (window.lucide?.createIcons) {
+                    if (deskNav) lucide.createIcons({ root: deskNav });
+                    if (mobileContainer) lucide.createIcons({ root: mobileContainer });
+                }
             } catch (e) {
                 console.warn('Navigation icons skipped:', e);
             }
@@ -2160,7 +2226,7 @@
             window.app.updateLiveWidget();
             if (window.appState.statusInterval) clearInterval(window.appState.statusInterval);
             window.appState.statusInterval = setInterval(window.app.updateLiveWidget, 60000);
-            lucide.createIcons();
+            lucide.createIcons({ root: document.getElementById('main-content') });
         };
 
         const renderSchedule = () => {
@@ -2490,6 +2556,60 @@
             document.getElementById('main-content').innerHTML = html;
         };
 
+        const updateRegisterResults = (rawSearch = '') => {
+            if (window.appState.view !== 'register') return;
+            const main = document.getElementById('main-content');
+            if (!main) return;
+            const user = window.appState.selectedStudent;
+            const filter = window.appState.regFilter;
+            const { pri } = getTheme();
+            const searchStr = String(rawSearch).toLowerCase().trim();
+            const filteredStudents = students.filter(s =>
+                (s.fullName || s.name).toLowerCase().includes(searchStr) &&
+                (filter === 'all' || s.electives.includes(filter))
+            );
+
+            const mobile = document.getElementById('reg-list-mobile');
+            if (mobile) {
+                mobile.innerHTML = filteredStudents.map((s, i) => {
+                    const isMe = user.id === s.id;
+                    return `<article class="student-mobile-card ${isMe ? `is-me border-${pri}-500/25` : ''}">
+                        <div class="flex items-start gap-3 min-w-0">
+                            <div class="student-index">${String(i + 1).padStart(2,'0')}</div>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="student-mobile-name ${isMe ? `text-${pri}-300` : 'text-white'}">${s.fullName || s.name}</div>
+                                    <div class="flex shrink-0 items-center gap-1.5">
+                                        ${s.isStarosta ? '<span class="student-badge student-badge-dark">Староста</span>' : ''}
+                                        ${isMe ? `<span class="student-badge student-badge-accent">Ви</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="student-mobile-tags">${s.electives.map(e => `<span class="student-tag ${discColors[e] || 'bg-zinc-800 text-zinc-300 border-white/10'}">${e}</span>`).join('')}</div>
+                            </div>
+                        </div>
+                    </article>`;
+                }).join('') || '<div class="py-8 text-center text-sm font-bold text-zinc-500">Нічого не знайдено.</div>';
+            }
+
+            const desktopBody = document.getElementById('reg-list-desktop');
+            if (desktopBody) {
+                desktopBody.innerHTML = filteredStudents.map((s, i) => {
+                    const isMe = user.id === s.id;
+                    return `<tr class="transition-colors hover:bg-white/80 dark:hover:bg-white/10 group ${isMe ? `bg-${pri}-50/60 dark:bg-${pri}-900/10` : ''}">
+                        <td class="py-4 md:py-5 px-4 text-[12px] md:text-[13px] font-black text-zinc-400 w-12 text-center">${i+1}</td>
+                        <td class="py-4 md:py-5 px-2 md:px-4 font-bold text-[14px] md:text-[15px] ${isMe ? `text-${pri}-600 dark:text-${pri}-400` : 'text-zinc-900 dark:text-zinc-100'} whitespace-nowrap">
+                            ${s.fullName || s.name}
+                            ${s.isStarosta ? `<span class="ml-2 px-2 md:px-2.5 py-0.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[9px] md:text-[10px] font-bold uppercase tracking-wide rounded-md shadow-sm">Староста</span>` : ''}
+                            ${isMe ? `<span class="ml-1.5 md:ml-2 px-2 md:px-2.5 py-0.5 text-${pri}-600 dark:text-${pri}-400 text-[9px] md:text-[10px] font-bold uppercase tracking-wide rounded-md border border-${pri}-200 dark:border-${pri}-500/30">(Ви)</span>` : ''}
+                        </td>
+                        <td class="py-4 md:py-5 px-4 flex flex-wrap gap-2 md:gap-2.5 justify-end md:justify-start">
+                            ${s.electives.map(e => `<span class="px-2.5 py-1 md:px-3 rounded-md text-[10px] md:text-[11px] font-bold uppercase tracking-wide border shadow-sm whitespace-nowrap ${discColors[e] || 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'}">${e}</span>`).join('')}
+                        </td>
+                    </tr>`;
+                }).join('');
+            }
+        };
+
         const renderRegister = () => {
             const { pri, sec } = getTheme();
             const user = window.appState.selectedStudent;
@@ -2531,10 +2651,10 @@
                         <div class="p-4 md:p-6 border-b border-zinc-200/80 dark:border-white/10 relative z-10 bg-white/40 dark:bg-black/20">
                             <div class="relative group">
                                 <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 w-5 h-5 group-focus-within:text-zinc-900 dark:group-focus-within:text-white transition-colors"></i>
-                                <input type="text" id="reg-search" value="${searchStr}" oninput="window.app.renderActiveView()" placeholder="Знайти студента..." class="w-full pl-12 pr-4 py-4 md:py-4 bg-white/60 dark:bg-zinc-800/60 rounded-[16px] md:rounded-[20px] text-[15px] font-bold outline-none focus:ring-2 ring-zinc-900 dark:ring-white border border-zinc-200/80 dark:border-white/10 transition-all shadow-inner text-zinc-900 dark:text-white" />
+                                <input type="text" id="reg-search" value="${searchStr}" oninput="window.app.filterRegister(this.value)" placeholder="Знайти студента..." class="w-full pl-12 pr-4 py-4 md:py-4 bg-white/60 dark:bg-zinc-800/60 rounded-[16px] md:rounded-[20px] text-[15px] font-bold outline-none focus:ring-2 ring-zinc-900 dark:ring-white border border-zinc-200/80 dark:border-white/10 transition-all shadow-inner text-zinc-900 dark:text-white" />
                             </div>
                         </div>
-                        <div class="md:hidden p-3 space-y-2.5 relative z-10">
+                        <div id="reg-list-mobile" class="md:hidden p-3 space-y-2.5 relative z-10">
                             ${filteredStudents.map((s, i) => {
                                 const isMe = user.id === s.id;
                                 return `
@@ -2559,7 +2679,7 @@
                         </div>
                         <div class="hidden md:block overflow-x-auto relative z-10 hide-scrollbar">
                             <table class="w-full text-left border-collapse min-w-[620px]">
-                                <tbody class="divide-y divide-zinc-200/80 dark:divide-white/5">
+                                <tbody id="reg-list-desktop" class="divide-y divide-zinc-200/80 dark:divide-white/5">
                                     ${filteredStudents.map((s, i) => {
                                         const isMe = user.id === s.id;
                                         return `
@@ -2582,11 +2702,6 @@
                 </div>
             `;
             document.getElementById('main-content').innerHTML = html;
-            if (searchStr) {
-                const searchEl = document.getElementById('reg-search');
-                searchEl.focus();
-                searchEl.setSelectionRange(searchStr.length, searchStr.length);
-            }
         };
 
         const renderEditor = () => {
@@ -2846,7 +2961,7 @@
 
                     window.appState.view = viewId;
                     window.appState.navSignature = '';
-                    window.app.renderActiveView();
+                    window.app.queueRenderActiveView();
                     window.scrollTo({ top: 0, behavior: 'auto' });
 
                     requestAnimationFrame(() => {
@@ -3011,8 +3126,23 @@
                 }
             },
 
+            queueRenderActiveView: (() => {
+                let raf = 0;
+                let timer = 0;
+                return () => {
+                    cancelAnimationFrame(raf);
+                    clearTimeout(timer);
+                    raf = requestAnimationFrame(() => {
+                        timer = window.setTimeout(() => {
+                            if (document.hidden) return;
+                            window.app.renderActiveView();
+                        }, 0);
+                    });
+                };
+            })(),
+
             renderActiveView: () => {
-                if(!window.appState.selectedStudent) return;
+                if (!window.appState.selectedStudent || document.hidden) return;
                 renderNav();
                 const v = window.appState.view;
                 if(v === 'dashboard') renderDashboard();
@@ -3024,11 +3154,6 @@
                 else if(v === 'editor') renderEditor();
                 else if(v === 'analytics') renderAnalytics();
                 
-                try {
-                    if (window.lucide?.createIcons) {
-                        lucide.createIcons({ root: document.getElementById('main-content') });
-                    }
-                } catch (e) {}
                 window.app.attachScrollDrag();
             },
 
@@ -3234,7 +3359,7 @@
                         </div>
                     `;
                     document.getElementById('modals').innerHTML = html;
-                    lucide.createIcons();
+                    lucide.createIcons({ root: document.getElementById('modals') });
                     setTimeout(() => document.getElementById('admin-pwd-input')?.focus(), 100);
                 } else {
                     window.app.login(studentId);
@@ -3259,7 +3384,7 @@
                     document.getElementById('auth-screen').classList.add('hidden');
                     document.getElementById('app').classList.remove('hidden');
                     window.appState.view = 'dashboard';
-                    window.app.renderActiveView();
+                    window.app.queueRenderActiveView();
                     
                     window.app.startAnalyticsSession(); 
                     window.app.initAnalyticsListener(); 
@@ -3309,7 +3434,7 @@
                     `).join('');
                     el.classList.remove('hidden');
                     document.querySelector(`[onclick="window.app.toggleThemeDropdown('${context}')"]`)?.setAttribute('aria-expanded','true');
-                    lucide.createIcons();
+                    lucide.createIcons({ root: el });
                 } else {
                     el.classList.add('hidden');
                     document.querySelector(`[onclick="window.app.toggleThemeDropdown('${context}')"]`)?.setAttribute('aria-expanded','false');
@@ -3468,7 +3593,7 @@
                 document.getElementById('background-dropdown-auth')?.classList.add('hidden');
 
                 if (!skipRender && window.appState.selectedStudent) {
-                    window.app.renderActiveView();
+                    window.app.queueRenderActiveView();
                 }
             },
 
@@ -3533,21 +3658,22 @@
 
             setScheduleMode: (mode) => { 
                 window.appState.scheduleMode = mode; 
-                window.app.renderActiveView(); 
+                window.app.queueRenderActiveView(); 
             },
-            setPersWeek: (type, num) => { window.appState.persMainWeek = type; window.appState.persActiveWeekNum = num; window.app.renderActiveView(); },
-            setMainWeek: (type, num) => { window.appState.mainViewWeek = type; window.appState.mainActiveWeekNum = num; window.app.renderActiveView(); },
-            setRegFilter: (f) => { window.appState.regFilter = f; window.app.renderActiveView(); },
-            setMatFilter: (f) => { window.appState.matFilter = f; window.app.renderActiveView(); },
-            setHwFilter: (f) => { window.appState.hwFilter = f; window.app.renderActiveView(); },
-            setAnalyticsDate: (dateStr) => { window.appState.analyticsDate = dateStr; window.app.renderActiveView(); },
+            setPersWeek: (type, num) => { window.appState.persMainWeek = type; window.appState.persActiveWeekNum = num; window.app.queueRenderActiveView(); },
+            setMainWeek: (type, num) => { window.appState.mainViewWeek = type; window.appState.mainActiveWeekNum = num; window.app.queueRenderActiveView(); },
+            setRegFilter: (f) => { window.appState.regFilter = f; window.app.queueRenderActiveView(); },
+            setMatFilter: (f) => { window.appState.matFilter = f; window.app.queueRenderActiveView(); },
+            setHwFilter: (f) => { window.appState.hwFilter = f; window.app.queueRenderActiveView(); },
+            setAnalyticsDate: (dateStr) => { window.appState.analyticsDate = dateStr; window.app.queueRenderActiveView(); },
+            filterRegister: (value) => { updateRegisterResults(value); },
 
             openMobileMenu: () => {
                 renderMobileMenu();
                 const menu = document.getElementById('mobile-menu');
                 menu.classList.remove('hidden');
                 setTimeout(() => menu.classList.add('opacity-100'), 10);
-                lucide.createIcons();
+                lucide.createIcons({ root: menu });
             },
             closeMobileMenu: () => {
                 const menu = document.getElementById('mobile-menu');
@@ -3575,7 +3701,7 @@
                     </div>
                 `;
                 document.getElementById('modals').innerHTML = html;
-                lucide.createIcons();
+                lucide.createIcons({ root: document.getElementById('modals') });
             },
 
             openHwModal: (subj, weekType, day, num, weekNum) => {
@@ -3618,7 +3744,7 @@
                     </div>
                 `;
                 document.getElementById('modals').innerHTML = html;
-                lucide.createIcons();
+                lucide.createIcons({ root: document.getElementById('modals') });
             },
 
             saveHomework: () => {
@@ -3669,7 +3795,7 @@
                     </div>
                 `;
                 document.getElementById('modals').innerHTML = html;
-                lucide.createIcons();
+                lucide.createIcons({ root: document.getElementById('modals') });
             },
 
             saveMaterial: () => {
@@ -3741,7 +3867,7 @@
                     </div>
                 `;
                 document.getElementById('modals').innerHTML = html;
-                lucide.createIcons();
+                lucide.createIcons({ root: document.getElementById('modals') });
             },
 
             saveLocation: () => {
@@ -3828,7 +3954,7 @@
                             snap.forEach(doc => links[doc.id] = doc.data());
                             window.appState.locationsData = links;
                             localStorage.setItem('portal-custom-locations', JSON.stringify(links));
-                            if (['schedule', 'main', 'dashboard'].includes(window.appState.view)) window.app.renderActiveView();
+                            if (['schedule', 'main', 'dashboard'].includes(window.appState.view)) window.app.queueRenderActiveView();
                         },
                         (error) => console.error('Locations error:', error)
                     );
@@ -3849,7 +3975,7 @@
                             }
                             window.appState.homeworks = newHwList;
                             localStorage.setItem('portal-homeworks', JSON.stringify(newHwList));
-                            if (['homework', 'dashboard', 'schedule', 'main'].includes(window.appState.view)) window.app.renderActiveView();
+                            if (['homework', 'dashboard', 'schedule', 'main'].includes(window.appState.view)) window.app.queueRenderActiveView();
                             else if (window.appState.selectedStudent) renderNav();
                         },
                         (error) => console.error('Homeworks error:', error)
@@ -3863,7 +3989,7 @@
                             mat.sort((a, b) => Number(b.id) - Number(a.id));
                             window.appState.materials = mat;
                             localStorage.setItem('portal-materials', JSON.stringify(mat));
-                            if (['materials', 'dashboard'].includes(window.appState.view)) window.app.renderActiveView();
+                            if (['materials', 'dashboard'].includes(window.appState.view)) window.app.queueRenderActiveView();
                         },
                         (error) => console.error('Materials error:', error)
                     );
@@ -3875,7 +4001,7 @@
                             snap.forEach(doc => extra.push({ id: doc.id, ...doc.data() }));
                             window.appState.extraSchedule = extra;
                             localStorage.setItem('portal-extra-schedule', JSON.stringify(extra));
-                            if (['schedule', 'main', 'editor', 'dashboard'].includes(window.appState.view)) window.app.renderActiveView();
+                            if (['schedule', 'main', 'editor', 'dashboard'].includes(window.appState.view)) window.app.queueRenderActiveView();
                         },
                         (error) => console.error('Extra schedule error:', error)
                     );
@@ -3887,7 +4013,7 @@
                             snap.forEach(doc => hidden.push({ id: doc.id, ...doc.data() }));
                             window.appState.hiddenSchedule = hidden;
                             localStorage.setItem('portal-hidden-schedule', JSON.stringify(hidden));
-                            if (['schedule', 'main', 'editor', 'dashboard'].includes(window.appState.view)) window.app.renderActiveView();
+                            if (['schedule', 'main', 'editor', 'dashboard'].includes(window.appState.view)) window.app.queueRenderActiveView();
                         },
                         (error) => console.error('Hidden schedule error:', error)
                     );
@@ -3950,7 +4076,7 @@
             } else {
                 document.getElementById('auth-screen')?.classList.remove('hidden');
                 try { window.app.renderAuthList(); } catch (e) { console.error('Auth render failed:', e); }
-                try { if (window.lucide?.createIcons) lucide.createIcons(); } catch (e) {}
+                try { if (window.lucide?.createIcons) lucide.createIcons({ root: document.getElementById('auth-screen') }); } catch (e) {}
             }
 
             // Start Firebase after first paint.
@@ -3996,6 +4122,17 @@
             document.addEventListener('pointerenter', () => {
                 glow.style.opacity = '';
             });
+        })();
+
+        // Mobile scroll performance: pause only decorative motion while the finger is moving.
+        (() => {
+            let stopTimer = 0;
+            window.addEventListener('scroll', () => {
+                if (window.innerWidth >= 768) return;
+                document.body.classList.add('is-scrolling');
+                clearTimeout(stopTimer);
+                stopTimer = window.setTimeout(() => document.body.classList.remove('is-scrolling'), 140);
+            }, { passive: true });
         })();
 
         // Run Init
