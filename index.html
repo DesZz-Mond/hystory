@@ -709,7 +709,7 @@
         body[data-premium-background="orbit"] .geometry-shape-a, body[data-premium-background="orbit"] .geometry-shape-b { border-radius: 999px; }
         body[data-premium-background="mesh"] .geometry-shape { border-radius: 8px; transform: rotate(0deg); }
         body[data-premium-background="wave"] .geometry-shape { border-radius: 999px; transform: rotate(12deg) scaleX(1.5); opacity:.35; }
-        #main-content { will-change: transform, opacity, filter; transform-origin: 50% 18%; }
+        #main-content { will-change: transform, opacity; transform-origin: 50% 18%; }
         #main-content.view-leave {
             opacity: 0 !important;
             filter: blur(8px) saturate(.82);
@@ -2944,7 +2944,11 @@
                 else if(v === 'editor') renderEditor();
                 else if(v === 'analytics') renderAnalytics();
                 
-                lucide.createIcons();
+                try {
+                    if (window.lucide?.createIcons) {
+                        lucide.createIcons({ root: document.getElementById('main-content') });
+                    }
+                } catch (e) {}
                 window.app.attachScrollDrag();
             },
 
@@ -3097,7 +3101,7 @@
                 };
                 
                 updateSession(); 
-                window.appState.analyticsInterval = setInterval(updateSession, 5000); 
+                window.appState.analyticsInterval = setInterval(updateSession, 15000); 
             },
 
             stopAnalyticsSession: () => {
@@ -3845,8 +3849,6 @@
 
         const initApp = () => {
             // Paint local UI first. Remote services are started afterwards.
-            try { initInteractiveBackground(); } catch (e) { console.warn('Interactive background disabled:', e); }
-
             if (window.appState.isDark) document.documentElement.classList.add('dark');
             else document.documentElement.classList.remove('dark');
 
@@ -3886,72 +3888,6 @@
                 try { window.app.startAnalyticsSession(); } catch (e) {}
             }
         });
-
-        // Lightweight interactive background. Pointer input is sampled and smoothed
-        // once per animation frame; only CSS transforms are updated.
-        const initInteractiveBackground = () => {
-            const root = document.getElementById('ambient-background');
-            if (!root) return;
-            const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-            const fine = window.matchMedia?.('(pointer: fine)').matches;
-            const coarse = window.matchMedia?.('(pointer: coarse)').matches;
-            if (reduce) return;
-
-            let targetX = 0, targetY = 0;
-            let currentX = 0, currentY = 0;
-            let raf = 0;
-            let active = !document.hidden;
-
-            const write = () => {
-                raf = 0;
-                if (!active) return;
-                currentX += (targetX - currentX) * (fine ? 0.12 : 0.09);
-                currentY += (targetY - currentY) * (fine ? 0.12 : 0.09);
-                root.style.setProperty('--pointer-rx', currentX.toFixed(4));
-                root.style.setProperty('--pointer-ry', currentY.toFixed(4));
-                if (Math.abs(targetX-currentX) > 0.001 || Math.abs(targetY-currentY) > 0.001) {
-                    raf = requestAnimationFrame(write);
-                }
-            };
-            const schedule = () => { if (!raf && active) raf = requestAnimationFrame(write); };
-
-            const setFromPoint = (clientX, clientY, strength) => {
-                const w = window.innerWidth || 1;
-                const h = window.innerHeight || 1;
-                targetX = ((clientX / w) - 0.5) * 2 * strength;
-                targetY = ((clientY / h) - 0.5) * 2 * strength;
-                schedule();
-            };
-
-            if (fine) {
-                window.addEventListener('pointermove', (e) => setFromPoint(e.clientX, e.clientY, 1), {passive:true});
-                window.addEventListener('pointerout', (e) => {
-                    if (e.relatedTarget) return;
-                    targetX = targetY = 0;
-                    schedule();
-                }, {passive:true});
-            } else if (coarse) {
-                window.addEventListener('touchmove', (e) => {
-                    const t = e.touches?.[0];
-                    if (t) setFromPoint(t.clientX, t.clientY, 0.42);
-                }, {passive:true});
-                window.addEventListener('touchend', () => { targetX = targetY = 0; schedule(); }, {passive:true});
-                window.addEventListener('touchcancel', () => { targetX = targetY = 0; schedule(); }, {passive:true});
-            }
-
-            document.addEventListener('visibilitychange', () => {
-                active = !document.hidden;
-                if (!active) {
-                    if (raf) cancelAnimationFrame(raf);
-                    raf = 0;
-                } else {
-                    schedule();
-                }
-            }, {passive:true});
-
-            window.addEventListener('resize', schedule, {passive:true});
-            schedule();
-        };
 
         // Premium pointer spotlight — disabled on touch/reduced-motion devices.
         (() => {
